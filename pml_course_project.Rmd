@@ -1,0 +1,158 @@
+---
+title: | 
+    | Predict exercise manners based on data
+    | from the quantified self context 
+author: "'Practical Machine Learning' course project of Hendrik L., September 2015"
+output: html_document
+---
+
+```{r setoptions, echo=FALSE, results='hide', message=FALSE}
+# preparing knitr 
+library(knitr)
+opts_chunk$set(echo = FALSE, results = "hide", cache = TRUE)
+
+# loading required libraries
+library(AppliedPredictiveModeling)
+library(caret)
+library(Hmisc)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+
+# setting the seed for reproducibility
+set.seed(787134)
+```
+
+&nbsp;
+
+### Download and read the training and test data
+```{r, echo=TRUE, results='markup'}
+# download and prepare the subTrainData data
+if (!file.exists("pmlTraining.csv")) {
+    fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-subTrainData.csv"
+    download.file(fileURL, "pmlTraining.csv", mode = "wb")
+}
+trainData <- read.csv("pmlTraining.csv", 
+    na.strings = c("NA", "NAs", "NULL", "#DIV/0!"," ", ""))
+
+# download and prepare the test data
+if (!file.exists("pmlTest.csv")) {
+    fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-subTestData.csv"
+    download.file(fileURL, "pmlTest.csv", mode = "wb")
+}
+testData <- read.csv("pmlTest.csv", 
+    na.strings = c("NA", "NAs", "NULL", "#DIV/0!"," ", ""))
+```
+
+&nbsp;
+
+### Drop columns with NA values and unnecessary data
+```{r, echo=TRUE, results='markup'}
+# drop the columns with NA values
+trainData <- trainData[, -which(names(trainData) %in% c("X", "user_name", 
+    "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", 
+    "new_window", "num_window"))]
+trainData <- trainData[, colSums(is.na(trainData)) == 0]
+```
+
+&nbsp;
+
+### Remove zero and near-zero variance predictors
+```{r, echo=TRUE, results='markup'}
+# zero variance predictors: they have one unique value across samples 
+# near-zero variance predictors: they have both few unique values relative to the 
+#   number of samples and a large ratio of the frequency of the most common value 
+#   to the frequency of the second most common value
+nearZV <- nearZeroVar(trainData[sapply(trainData, is.numeric)], saveMetrics = TRUE)
+trainData <- trainData[, nearZV[, 'nzv'] == 0]
+```
+
+&nbsp;
+
+### Remove highly correlated data (correlation cutoff = 0.7)
+```{r, echo=TRUE, results='markup'}
+corMatrix <- cor(na.omit(trainData[sapply(trainData, is.numeric)]))
+# correlationmatrixdegreesoffreedom <- expand.grid(row = 1:52, col = 1:52)
+# correlationmatrixdegreesoffreedom$correlation <- as.vector(corMatrix) 
+corIndex <- findCorrelation(corMatrix, cutoff = 0.7, verbose = TRUE)
+trainData <- trainData[, -corIndex]
+```
+
+&nbsp;
+
+### Remove blank columns from training and test data
+```{r, echo=TRUE, results='markup'}
+for (i in c(8:ncol(trainData) - 1)) { 
+    trainData[,i] <- as.numeric(as.character(trainData[,i]))
+}
+for (i in c(8:ncol(testData) - 1)) {
+    testData[,i] <- as.numeric(as.character(testData[,i]))
+}
+```
+
+&nbsp;
+
+### Create the final feature set and model data
+```{r, echo=TRUE, results='markup'}
+featureset <- colnames(trainData[colSums(is.na(trainData)) == 0])[-(1:7)]
+modeldata <- trainData[featureset]
+```
+
+&nbsp;
+
+### Subset the training data (60% for training, 40% for testing)
+```{r, echo=TRUE, results='markup'}
+trainIndex <- createDataPartition(modeldata$classe, p = 0.6, list = FALSE )
+subTrainData <- modeldata[trainIndex,]
+subTestData <- modeldata[-trainIndex,]
+```
+
+&nbsp;
+
+### Fit a random forest model with 5-fold cross validation
+```{r, echo=TRUE, results='markup'}
+control <- trainControl(method = "cv", 5)
+model <- train(classe ~ ., data = subTrainData, method = "rf", 
+    trControl = control, ntree = 250)
+```
+
+&nbsp;
+
+### Evaluate the model performance 
+```{r, echo=TRUE, results='markup'}
+predict <- predict(model, subTestData)
+confusionMatrix(subTestData$classe, predict)
+accuracy <- postResample(predict, subTestData$classe)
+```
+
+&nbsp;
+
+**Estimated results:**   
+The estimated **model accuracy** is **`r round((accuracy[1]*100), 2)`%** and the estimated **out of sample error** is **`r round(100-(accuracy[1]*100), 2)`%**.
+
+&nbsp;
+
+### Show the tree model
+```{r, echo=TRUE, results='markup'}
+treeModel <- rpart(classe ~ ., data = trainData, method = "class")
+prp(treeModel) 
+```
+
+&nbsp;
+
+### Part 2 of the course project:
+### Predict the results for the test data and write them to files for submission
+```{r, echo=TRUE, results='markup'}
+testData <- testData[featureset[featureset != 'classe']]
+predictedResults <- predict(model, newdata = testData)
+for (i in 1:length(predictedResults)) {
+    filename = paste0("problem_id_", i, ".txt")
+    write.table(predictedResults[i], file = filename, quote = FALSE, 
+        row.names = FALSE, col.names = FALSE)
+}
+```
+
+&nbsp;
+
+&nbsp;
